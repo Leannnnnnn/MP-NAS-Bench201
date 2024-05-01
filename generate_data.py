@@ -84,8 +84,6 @@ if __name__ == "__main__":
         # 使用glob找出所有匹配的文件
         pattern = os.path.join(yaml_path, '*_*.yaml')
         files = glob.glob(pattern)
-        models = []
-        count = 0
         for file_path in files:
             match = re.search(r'([0-9]+_[0-9]+).yaml', file_path)
             if match:
