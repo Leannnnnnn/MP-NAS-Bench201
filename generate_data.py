@@ -38,7 +38,7 @@ if __name__ == "__main__":
     H2 = {'dataset': 'cifar10','epochs': 150, 'lr': 0.01, 'batch_size': 512}
     H3 = {'dataset': 'cifar10','epochs': 150, 'lr': 0.01, 'batch_size': 1024}
 
-    epoch_list = [50, 100, 150, 150]
+    epoch_list = [50, 100, 150]
 
     total_model = args.total
     target_H = H1
@@ -83,7 +83,7 @@ if __name__ == "__main__":
                             10981, 11060, 11195, 11388, 11391, 11607, 11749, 11838, 12088, 12139, 12617, 12670, 12704, 12897, 12979, 13868, 
                             13875, 13902, 14004, 14056, 14162, 14274, 14713, 15065, 15188, 15207, 15234]
 
-    choosen_index_list = cell_uniform_list_100_4
+    choosen_index_list = cell_uniform_list_100_3
 
     def get_cache():
         cache = {}
