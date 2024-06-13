@@ -284,8 +284,8 @@ def get_network(api, net_idx, dataset = 'cifar10', quant = False):
     network = get_cell_based_tiny_net(config)
 
     # Load the pre-trained weights: params is a dict, where the key is the seed and value is the weights.
-    params = api.get_net_param(net_idx, dataset, None, hp = 200)
-    network.load_state_dict(next(iter(params.values())))
+    # params = api.get_net_param(net_idx, dataset, None, hp = 200)
+    # network.load_state_dict(next(iter(params.values())))
 
     if quant:
         convert_conv2d_to_qconv2d(network, w_bit=8, a_bit=8 )

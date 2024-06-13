@@ -48,7 +48,7 @@ if __name__ == "__main__":
     train_loader, valid_loader, test_loader = load_data('cifar10', '~/dataset', target_H)
     print('Dataset prepared.')
 
-    api = create('/home/dell/dataset/NATS-tss-v1_0-3ffb9-full_cat/NATS-tss-v1_0-3ffb9-full', 'tss', fast_mode=True, verbose=False)
+    api = create('/home/dell/dataset/NATS-tss-v1_0-3ffb9-simple', 'tss', fast_mode=True, verbose=False)
 
     yaml_path = '/home/dell/MP-NAS-Bench201/results/configs/'
     model_save_dir = '/home/dell/MP-NAS-Bench201/results/models'
