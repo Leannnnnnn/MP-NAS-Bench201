@@ -23,6 +23,8 @@ class MixBitAssign:
         self.yaml_path = yaml_path
         self.table_cache = yaml_cache
         self.conv_positions = conv_positions
+        self.params = 0
+        self.params_count = 0
         # 初始化位宽配置字典
         self.config_table = {
             'index' : self.dict_idx,
@@ -40,7 +42,12 @@ class MixBitAssign:
                     5:{'conv_a': {'w_bit': 8, 'a_bit': 8}, 'conv_b': {'w_bit': 8, 'a_bit': 8}, 'downsample': {'w_bit': 8, 'a_bit': 8}}, 
                     11:{'conv_a': {'w_bit': 8, 'a_bit': 8}, 'conv_b': {'w_bit': 8, 'a_bit': 8}, 'downsample': {'w_bit': 8, 'a_bit': 8}}},
                 'classifier': {'qlinear':{'w_bit': 8, 'a_bit': 8}}
-                }
+                },
+            # 'model_size(MB)': 0.5,
+            # 'param(M)': 0.5,
+            # 'avg_bit': 4,
+            # 'FLOPs(M)':0.5,
+            # 'MACs(M)':0.5,
         }
         # 为每个infercell的conv层设置位宽
         for i in [0,1,2,3,4,6,7,8,9,10,12,13,14,15,16]:
@@ -62,6 +69,15 @@ class MixBitAssign:
             yaml.dump(self.config_table, file, default_flow_style=False)
         
         print('Bitwidth configuration saved to {}'.format(path))
+    
+    def save_size_info(self, model_size, param, FLOPs, MACs):
+        # self.config_table['model_size(MB)'] = model_size
+        self.config_table['param(M)'] = param
+        self.config_table['FLOPs(M)'] = FLOPs
+        # self.config_table['MACs(M)'] = MACs
+        path = self.yaml_path+'{}.yaml'.format(self.dict_idx)
+        with open(path, 'w') as file:
+            yaml.dump(self.config_table, file, default_flow_style=False)
 
     def load_yaml(self, match):
         filename = self.yaml_path+'{}.yaml'.format(self.dict_idx)
@@ -74,7 +90,11 @@ class MixBitAssign:
             print('Don\'t match, get next one.')
             return False
         # 如果 self.config_table有'val_accuracy'键则返回False
-        if 'val_accuracy' in self.config_table:
+        # if 'val_accuracy' in self.config_table:
+        #     print('Result exists, get next one.')
+        #     return False
+
+        if 'model_size(MB)' in self.config_table:
             print('Result exists, get next one.')
             return False
 
@@ -188,7 +208,7 @@ class MixBitAssign:
                 for conv in ['conv_a', 'conv_b', 'downsample']:
                     bitwidths = {"w_bit": random.choice([2,4,8]), "a_bit": random.choice([8])}
                     self.config_table['bit_width']['resblock'][idx][conv] = bitwidths
-            self.config_table['bit_width']['classifier'] = {"w_bit": random.choice([2,4,8]), "a_bit": random.choice([8])}
+            self.config_table['bit_width']['classifier'] = {'qlinear':{"w_bit": random.choice([2,4,8]), "a_bit": random.choice([8])}}
 
         # 先判断该model+位宽设置是否已存在
         models = []
@@ -196,7 +216,7 @@ class MixBitAssign:
         for key in self.table_cache.keys():
             split = key.split('_')
             if self.model_idx == int(split[0]):
-                if self.config_table['bit_width'] == self.table_cache[key]['bit_width']:
+                if self.config_table['bit_width'] == self.table_cache[key]['bit_width'] and self.config_table['train_info']['lr'] == self.table_cache[key]['train_info']['lr']:
                     # if self.config_table['train_info'] == self.table_cache[key]['train_info']: # 配置已存在，包括位宽分配和训练epoch均相同
                     #     return False
                     # else: # 配置已存在，只有训练epoch不同
@@ -225,23 +245,32 @@ class MixBitAssign:
         #     bit_info = self.get_bitwidth_info(name)
         #     if bit_info and hasattr(module, 'w_bit') and hasattr(module, 'a_bit'):
         #         module.w_bit, module.a_bit = bit_info['w_bit'], bit_info['a_bit']
+        
         for name, child in self.model.named_children():
             if name == 'stem':
                 child[0].w_bit = self.config_table['bit_width']['stem']['qconv']['w_bit']
                 child[0].a_bit = self.config_table['bit_width']['stem']['qconv']['a_bit']
+                self.params += child[0].weight.numel() * self.config_table['bit_width']['stem']['qconv']['w_bit'] / 8
+                self.params += child[1].weight.numel() * 4
+                self.params += child[1].bias.numel() * 4
+                self.params_count += child[0].weight.numel()+child[1].weight.numel()+child[1].bias.numel()
             if name =='cells':
                 infer_list = [i for r in (range(0, 5), range(6, 11), range(12, 17)) for i in r]
                 for j in infer_list:
                     for i in self.config_table['bit_width']['infercell'][j].keys():
-                        set_quantization_bits_infercell(child[j], i, bit_width=self.config_table['bit_width']['infercell'][j][i])
+                        self.set_quantization_bits_infercell(child[j], i, bit_width=self.config_table['bit_width']['infercell'][j][i])
                 
                 for idx in [5,11]:
                     for keys in self.config_table['bit_width']['resblock'][idx].keys():
-                        set_quantization_bits_blockcell(child[idx], keys, bit_width=self.config_table['bit_width']['resblock'][idx][keys])
+                        self.set_quantization_bits_blockcell(child[idx], keys, bit_width=self.config_table['bit_width']['resblock'][idx][keys])
             if name =='classifier': 
                 child.w_bit = self.config_table['bit_width']['classifier']['qlinear']['w_bit']
                 child.a_bit = self.config_table['bit_width']['classifier']['qlinear']['a_bit']
+                self.params += child.weight.numel() * self.config_table['bit_width']['classifier']['qlinear']['w_bit'] / 8
+                self.params += child.bias.numel() * 4
+                self.params_count += child.weight.numel()+child.bias.numel()
         # print('Set bit width: {}'.format(self.bitwidth_table))
+
 
     def get_bitwidth_info(self):
         return self.config_table['bit_width']
@@ -264,49 +293,59 @@ class MixBitAssign:
     
 
         
-def set_quantization_bits_infercell(module, layer_index, bit_width):
-    """
-    设置InferCell中QConv2d层的量化位宽。
-    Args:
-    - module: 模型或子模块。
-    - layer_index: 要设置的QConv2d层的索引序号。
-    - w_bit: 权重的量化位宽。
-    - a_bit: 激活的量化位宽。
-    """
-    for name, child in module.named_children():
-        if isinstance(child, ReLUConvBN):  # 假设ReLUConvBN是一个定义好的类
-            # 检查当前的序号是否为目标层序号
-            if name == str(layer_index):
-                # 设置QConv2d层的量化位宽
-                child.op[1].w_bit = bit_width['w_bit']
-                child.op[1].a_bit = bit_width['a_bit']
-                # print(f"Set QConv2d at layer {layer_index} to w_bit={w_bit}, a_bit={a_bit}")
-                return True  # 返回True表示已成功设置位宽
-        # 递归检查子模块
-        elif set_quantization_bits_infercell(child, layer_index, bit_width):
-            return True  # 如果在子模块中找到并设置了位宽，则提前返回True
-    return False  # 如果没有找到目标层，返回False
+    def set_quantization_bits_infercell(self, module, layer_index, bit_width):
+        """
+        设置InferCell中QConv2d层的量化位宽。
+        Args:
+        - module: 模型或子模块。
+        - layer_index: 要设置的QConv2d层的索引序号。
+        - w_bit: 权重的量化位宽。
+        - a_bit: 激活的量化位宽。
+        """
+        for name, child in module.named_children():
+            if isinstance(child, ReLUConvBN):  # 假设ReLUConvBN是一个定义好的类
+                # 检查当前的序号是否为目标层序号
+                if name == str(layer_index):
+                    # 设置QConv2d层的量化位宽
+                    child.op[1].w_bit = bit_width['w_bit']
+                    child.op[1].a_bit = bit_width['a_bit']
+                    # print(f"Set QConv2d at layer {layer_index} to w_bit={w_bit}, a_bit={a_bit}")
+                    self.params += child.op[1].weight.numel() * bit_width['w_bit'] / 8
+                    self.params += child.op[2].weight.numel() * 4
+                    self.params += child.op[2].bias.numel() * 4
+                    self.params_count += child.op[1].weight.numel()+child.op[2].weight.numel()+child.op[2].bias.numel()
+                    return True  # 返回True表示已成功设置位宽
+            # 递归检查子模块
+            elif self.set_quantization_bits_infercell(child, layer_index, bit_width):
+                return True  # 如果在子模块中找到并设置了位宽，则提前返回True
+        return False  # 如果没有找到目标层，返回False
 
-def set_quantization_bits_blockcell(module, model_name, bit_width):
-    """
-    设置ResnetBasicBlock中QConv2d层的量化位宽。
-    Args:
-    - module: 模型或子模块。
-    - layer_index: 要设置的QConv2d层的索引序号。
-    - w_bit: 权重的量化位宽。
-    - a_bit: 激活的量化位宽。
-    """
-    for name, block_child in module.named_children(): 
-        if name == model_name:
-            # print(name)
-            if name == 'downsample':
-                block_child[1].w_bit = bit_width['w_bit']
-                block_child[1].a_bit = bit_width['a_bit']
-            else:
-                block_child.op[1].w_bit = bit_width['w_bit']
-                block_child.op[1].a_bit = bit_width['a_bit']
-            # print("Set QConv2d at ResNetBasicblock {} to w_bit={}, a_bit={}".format(model_name,w_bit,a_bit))
-            return True  # 返回True表示已成功设置位宽
-        elif set_quantization_bits_blockcell(block_child, model_name, bit_width):
-            return True
-    return False
+    def set_quantization_bits_blockcell(self, module, model_name, bit_width):
+        """
+        设置ResnetBasicBlock中QConv2d层的量化位宽。
+        Args:
+        - module: 模型或子模块。
+        - layer_index: 要设置的QConv2d层的索引序号。
+        - w_bit: 权重的量化位宽。
+        - a_bit: 激活的量化位宽。
+        """
+        for name, block_child in module.named_children(): 
+            if name == model_name:
+                # print(name)
+                if name == 'downsample':
+                    block_child[1].w_bit = bit_width['w_bit']
+                    block_child[1].a_bit = bit_width['a_bit']
+                    self.params += block_child[1].weight.numel() * bit_width['w_bit'] / 8
+                    self.params_count += block_child[1].weight.numel()
+                else:
+                    block_child.op[1].w_bit = bit_width['w_bit']
+                    block_child.op[1].a_bit = bit_width['a_bit']
+                    self.params += block_child.op[1].weight.numel() * bit_width['w_bit'] / 8
+                    self.params += block_child.op[2].weight.numel() * 4
+                    self.params += block_child.op[2].bias.numel() * 4
+                    self.params_count += block_child.op[1].weight.numel()+ block_child.op[2].weight.numel()+ block_child.op[2].bias.numel()
+                # print("Set QConv2d at ResNetBasicblock {} to w_bit={}, a_bit={}".format(model_name,w_bit,a_bit))
+                return True  # 返回True表示已成功设置位宽
+            elif self.set_quantization_bits_blockcell(block_child, model_name, bit_width):
+                return True
+        return False

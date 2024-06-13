@@ -17,7 +17,16 @@ import xautodl
 from xautodl.models import get_cell_based_tiny_net
 
 
-def load_data(dataset, path, target_H):
+def load_data(dataset, path, target_H, seed = 888):
+    """
+    Load dataset and return dataloader
+    """
+    # Set random seed
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    print('Set random seed: ', seed)
+
     '''Load dataset'''
     transform = transforms.Compose([
         transforms.RandomHorizontalFlip(),
@@ -91,7 +100,7 @@ def train_model(model, H, model_save_dir, train_loader, model_idx, device = '0',
         scheduler.step()
         print(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item()}")
         loss_list.append(loss.item())
-        if(epoch > 5) and sum(loss_list)/len(loss_list) > 2.2:
+        if(epoch > 5) and sum(loss_list)/len(loss_list) > 2.0:
             print("Loss is not decreasing, early stopping")
             break
 
